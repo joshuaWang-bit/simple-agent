@@ -36,7 +36,7 @@ def _apply_toml(config: AgentConfig, data: dict[str, Any]) -> None:
 
 
 def _apply_env(config: AgentConfig) -> None:
-    for key in config.model_fields.keys():
+    for key in AgentConfig.model_fields.keys():
         env_key = f"SAGENT_{key.upper()}"
         if env_key in os.environ:
             setattr(config, key, os.environ[env_key])
