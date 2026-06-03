@@ -1,8 +1,9 @@
-from typing import Awaitable, Callable
+import inspect
+from typing import Any, Callable
 
 from pydantic import BaseModel
 
-EventHandler = Callable[[BaseModel], Awaitable[None]]
+EventHandler = Callable[[BaseModel], Any]
 
 
 class EventBus:
@@ -14,4 +15,6 @@ class EventBus:
 
     async def publish(self, event: BaseModel) -> None:
         for handler in self._subscribers:
-            await handler(event)
+            result = handler(event)
+            if inspect.isawaitable(result):
+                await result
