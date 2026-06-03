@@ -56,6 +56,7 @@ class AgentRunner:
             model=model,
             api_base=self._config.llm_api_base,
             api_key=self._config.llm_api_key,
+            enable_thinking=self._config.llm_enable_thinking,
         )
         registry = ToolRegistry()
         registry.register(ReadFileTool())

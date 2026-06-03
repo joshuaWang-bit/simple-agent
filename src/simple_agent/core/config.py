@@ -24,6 +24,7 @@ class AgentConfig(BaseModel):
     llm_model_ultra: str = "THUDM/glm-5.1"
     llm_model_pro: str = ""
     llm_model_fast: str = "Qwen/Qwen3.6-35B-A3B"
+    llm_enable_thinking: bool = False
     agent_max_steps: int = 20
 
     model_config = {"extra": "ignore"}

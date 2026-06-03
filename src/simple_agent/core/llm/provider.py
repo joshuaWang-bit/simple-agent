@@ -40,11 +40,13 @@ class OpenAICompatibleProvider:
         api_base: str = "https://api.siliconflow.cn/v1",
         api_key: str | None = None,
         timeout: float = 120.0,
+        enable_thinking: bool = False,
     ) -> None:
         import httpx
 
         self._model = model
         self._api_key = api_key or os.environ.get("WIKI_LLM_SILICONFLOW_API_KEY") or os.environ.get("SILICONFLOW_API_KEY", "")
+        self._enable_thinking = enable_thinking
         self._client = AsyncOpenAI(
             base_url=api_base,
             api_key=self._api_key,
@@ -64,12 +66,17 @@ class OpenAICompatibleProvider:
 
         tools = _to_openai_tools(tool_schemas) if tool_schemas else []
 
+        extra_body: dict[str, Any] = {}
+        if not self._enable_thinking:
+            extra_body["enable_thinking"] = False
+
         response = await self._client.chat.completions.create(
             model=self._model,
             messages=messages,
             tools=tools or [],
             max_tokens=4096,
             stream=True,
+            extra_body=extra_body or None,
         )
 
         text_parts: list[str] = []
