@@ -1,22 +1,42 @@
-from pydantic import BaseModel
+from typing import Any
 
 
 class StdoutPrinter:
-    def handle(self, event: BaseModel) -> None:
-        t = getattr(event, "type", "")
+    def handle(self, event: Any) -> None:
+        if isinstance(event, dict):
+            t = event.get("type", "")
+            run_id = event.get("run_id", "")
+        else:
+            t = getattr(event, "type", "")
+            run_id = getattr(event, "run_id", "")
+
         match t:
             case "run.started":
-                print(f"[run] {event.run_id}")
+                goal = event.get("goal", "") if isinstance(event, dict) else getattr(event, "goal", "")
+                print(f"[run] {run_id} {goal}")
             case "step.started":
-                print(f"[step {event.step}] planning...")
+                step = event.get("step", 0) if isinstance(event, dict) else getattr(event, "step", 0)
+                print(f"[step {step}] planning...")
             case "llm.token":
-                print(event.token, end="", flush=True)
+                token = event.get("token", "") if isinstance(event, dict) else getattr(event, "token", "")
+                print(token, end="", flush=True)
             case "tool.call_started":
-                print(f"\n[tool] {event.tool_name} {event.input}")
+                tool_name = event.get("tool_name", "") if isinstance(event, dict) else getattr(event, "tool_name", "")
+                input_data = event.get("input", {}) if isinstance(event, dict) else getattr(event, "input", {})
+                print(f"\n[tool] {tool_name} {input_data}")
             case "tool.call_finished":
-                print(f"[tool] {event.tool_name} ✓  {event.elapsed_ms}ms")
+                tool_name = event.get("tool_name", "") if isinstance(event, dict) else getattr(event, "tool_name", "")
+                elapsed_ms = event.get("elapsed_ms", 0) if isinstance(event, dict) else getattr(event, "elapsed_ms", 0)
+                print(f"[tool] {tool_name} ✓  {elapsed_ms}ms")
             case "step.finished":
-                print(f"\n[step {event.step}] done")
+                step = event.get("step", 0) if isinstance(event, dict) else getattr(event, "step", 0)
+                print(f"\n[step {step}] done")
             case "run.finished":
-                status = "success" if event.status == "success" else event.reason
-                print(f"[run] {status}  {event.step_count} steps  {event.elapsed_s:.1f}s")
+                status = event.get("status", "") if isinstance(event, dict) else getattr(event, "status", "")
+                step_count = event.get("step_count", 0) if isinstance(event, dict) else getattr(event, "step_count", 0)
+                elapsed_s = event.get("elapsed_s", 0.0) if isinstance(event, dict) else getattr(event, "elapsed_s", 0.0)
+                reason = event.get("reason", None) if isinstance(event, dict) else getattr(event, "reason", None)
+                if status == "success":
+                    print(f"[run] success  {step_count} steps  {elapsed_s:.1f}s")
+                else:
+                    print(f"[run] {reason or status}  {step_count} steps  {elapsed_s:.1f}s")

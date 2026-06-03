@@ -33,20 +33,22 @@ class AgentRunner:
         provider: OpenAICompatibleProvider | None = None,
         extra_handlers: list[EventHandler] | None = None,
         runs_dir: Path | None = None,
+        bus: EventBus | None = None,
     ) -> None:
         self._config = config
         self._provider = provider
         self._extra_handlers = extra_handlers or []
         self._runs_dir = runs_dir or Path("runs")
+        self._bus = bus
 
-    async def run(self, goal: str) -> None:
+    async def run(self, goal: str, run_id: str | None = None) -> None:
         # 1. 为这次运行生成唯一 ID，创建对应目录
-        run_id = new_run_id()
+        run_id = run_id or new_run_id()
         run_path = self._runs_dir / run_id
         run_path.mkdir(parents=True, exist_ok=True)
 
         # 2. 建立事件总线，订阅所有监听者
-        bus = EventBus()
+        bus = self._bus or EventBus()
         for h in self._extra_handlers:
             bus.subscribe(h)
 

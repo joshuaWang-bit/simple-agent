@@ -44,3 +44,8 @@ def make_error(
         id=req_id,
         error=JsonRpcErrorObject(code=code, message=message, data=data),
     )
+
+
+class EventPushEnvelope(BaseModel):
+    kind: Literal["event"] = "event"
+    event: dict[str, Any]

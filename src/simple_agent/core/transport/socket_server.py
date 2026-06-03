@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from contextvars import ContextVar
 from typing import Any, Awaitable, Callable
 
 from simple_agent.core.bus.envelope import (
@@ -21,6 +22,12 @@ logger = logging.getLogger(__name__)
 _MAX_LINE_BYTES = 1024 * 1024  # 1 MB
 
 Handler = Callable[[dict[str, Any]], Awaitable[Any]]
+
+_writer_var: ContextVar[asyncio.StreamWriter] = ContextVar("_writer_var")
+
+
+def get_connection_writer() -> asyncio.StreamWriter:
+    return _writer_var.get()
 
 
 class SocketServer:
@@ -56,6 +63,16 @@ class SocketServer:
             self._server.close()
             await self._server.wait_closed()
 
+    def __init__(self, host: str, port: int) -> None:
+        self._host = host
+        self._port = port
+        self._handlers: dict[str, Handler] = {}
+        self._server: asyncio.Server | None = None
+        self._broadcaster: Any | None = None
+
+    def set_broadcaster(self, broadcaster: Any) -> None:
+        self._broadcaster = broadcaster
+
     async def _handle_connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
@@ -64,6 +81,8 @@ class SocketServer:
         try:
             await self._read_loop(reader, writer)
         finally:
+            if self._broadcaster is not None:
+                self._broadcaster.unsubscribe(writer)
             writer.close()
             await writer.wait_closed()
             logger.debug("Client disconnected: %s", addr)
@@ -106,6 +125,7 @@ class SocketServer:
             return
 
         try:
+            _writer_var.set(writer)
             result = await handler(req.params)
         except Exception as e:
             from pydantic import ValidationError
