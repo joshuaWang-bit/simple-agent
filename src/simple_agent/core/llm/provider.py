@@ -39,12 +39,16 @@ class OpenAICompatibleProvider:
         model: str,
         api_base: str = "https://api.siliconflow.cn/v1",
         api_key: str | None = None,
+        timeout: float = 120.0,
     ) -> None:
+        import httpx
+
         self._model = model
         self._api_key = api_key or os.environ.get("WIKI_LLM_SILICONFLOW_API_KEY") or os.environ.get("SILICONFLOW_API_KEY", "")
         self._client = AsyncOpenAI(
             base_url=api_base,
             api_key=self._api_key,
+            timeout=httpx.Timeout(timeout, connect=10.0),
         )
 
     async def chat(
