@@ -18,6 +18,13 @@ class AgentConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 7437
     log_level: str = "INFO"
+    llm_tier: str = "fast"  # ultra | pro | fast
+    llm_api_base: str = "https://api.siliconflow.cn/v1"
+    llm_api_key: str | None = None
+    llm_model_ultra: str = "THUDM/glm-5.1"
+    llm_model_pro: str = ""
+    llm_model_fast: str = "Qwen/Qwen3.6-35B-A3B"
+    agent_max_steps: int = 20
 
     model_config = {"extra": "ignore"}
 
