@@ -73,6 +73,8 @@ class OpenAICompatibleProvider:
         finish_reason = ""
 
         async for chunk in response:
+            if not chunk.choices:
+                continue
             choice = chunk.choices[0]
             delta = choice.delta
 

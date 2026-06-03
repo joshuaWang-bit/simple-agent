@@ -60,8 +60,11 @@ class AgentLoop:
             except asyncio.CancelledError:
                 context.mark_failed("cancelled")
                 raise
-            except Exception:
-                context.mark_failed("llm_error")
+            except Exception as exc:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.exception("LLM request failed: %s", exc)
+                context.mark_failed(f"llm_error: {exc}")
                 break
 
             # — observe: 把 LLM 响应追加到对话历史 —
