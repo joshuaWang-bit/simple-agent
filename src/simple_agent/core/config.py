@@ -34,6 +34,10 @@ def setup_logging(config: AgentConfig) -> None:
         level=getattr(logging, config.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    # 抑制第三方库的 INFO 日志（重试、HTTP请求等）
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def _apply_toml(config: AgentConfig, data: dict[str, Any]) -> None:
