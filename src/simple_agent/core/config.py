@@ -44,8 +44,20 @@ def setup_logging(config: AgentConfig) -> None:
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
-def _apply_toml(config: AgentConfig, data: dict[str, Any]) -> None:
+def _flatten_toml(data: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+    result: dict[str, Any] = {}
     for key, value in data.items():
+        flat_key = f"{prefix}{key}" if not prefix else f"{prefix}_{key}"
+        if isinstance(value, dict):
+            result.update(_flatten_toml(value, flat_key))
+        else:
+            result[flat_key] = value
+    return result
+
+
+def _apply_toml(config: AgentConfig, data: dict[str, Any]) -> None:
+    flat = _flatten_toml(data)
+    for key, value in flat.items():
         if hasattr(config, key):
             setattr(config, key, value)
 
