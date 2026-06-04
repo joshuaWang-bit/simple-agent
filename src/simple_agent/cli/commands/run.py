@@ -33,7 +33,7 @@ async def _run_async(goal: str, config: AgentConfig) -> int:
 
     async def on_event(event: dict[str, Any]) -> None:
         nonlocal exit_code
-        await printer.handle(event)
+        printer.handle(event)
         if event.get("type") == "run.finished":
             exit_code = 0 if event.get("status") == "success" else 1
             finished.set()
