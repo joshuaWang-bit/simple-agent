@@ -14,6 +14,8 @@ from simple_agent.core.llm.provider import OpenAICompatibleProvider
 from simple_agent.core.loop import AgentLoop
 from simple_agent.core.tools.read_file import ReadFileTool
 from simple_agent.core.tools.registry import ToolRegistry
+from simple_agent.core.trace.provider import TracingProvider
+from simple_agent.core.trace.writer import TraceWriter
 
 
 def new_run_id() -> str:
@@ -34,12 +36,14 @@ class AgentRunner:
         extra_handlers: list[EventHandler] | None = None,
         runs_dir: Path | None = None,
         bus: EventBus | None = None,
+        trace: TraceWriter | None = None,
     ) -> None:
         self._config = config
         self._provider = provider
         self._extra_handlers = extra_handlers or []
         self._runs_dir = runs_dir or Path("runs")
         self._bus = bus
+        self._trace = trace
 
     async def run(self, goal: str, run_id: str | None = None) -> None:
         # 1. 为这次运行生成唯一 ID，创建对应目录
@@ -60,6 +64,15 @@ class AgentRunner:
             api_key=self._config.llm_api_key,
             enable_thinking=self._config.llm_enable_thinking,
         )
+
+        # 埋点 ④：用 TracingProvider 包装真实 provider
+        if self._trace is not None:
+            provider = TracingProvider(
+                provider,
+                self._trace,
+                include_payload=self._config.trace_include_llm_payload,
+            )
+
         registry = ToolRegistry()
         registry.register(ReadFileTool())
         loop = AgentLoop(provider, registry, bus)

@@ -59,6 +59,8 @@ class OpenAICompatibleProvider:
         tool_schemas: list[dict[str, Any]],
         bus: EventBus,
         run_id: str,
+        *,
+        step: int = 0,
     ) -> LlmResponse:
         await bus.publish(
             LlmRequestEvent(run_id=run_id, model=self._model, ts=_now())

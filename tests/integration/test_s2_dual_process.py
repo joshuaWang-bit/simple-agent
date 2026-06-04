@@ -22,6 +22,8 @@ class FakeProvider:
         tool_schemas: list[dict[str, Any]],
         bus: Any,
         run_id: str,
+        *,
+        step: int = 0,
     ) -> LlmResponse:
         await asyncio.sleep(0.1)
         return LlmResponse(text="done", stop_reason="end_turn")

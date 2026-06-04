@@ -10,12 +10,15 @@ from simple_agent.core.bus.envelope import (
     INVALID_PARAMS,
     INVALID_REQUEST,
     INTERNAL_ERROR,
+    JsonRpcError,
     JsonRpcRequest,
     JsonRpcSuccess,
     METHOD_NOT_FOUND,
     PARSE_ERROR,
     make_error,
 )
+from simple_agent.core.trace.record import TraceRecord, _now
+from simple_agent.core.trace.writer import TraceWriter
 
 logger = logging.getLogger(__name__)
 
@@ -31,14 +34,24 @@ def get_connection_writer() -> asyncio.StreamWriter:
 
 
 class SocketServer:
-    def __init__(self, host: str, port: int) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        trace: TraceWriter | None = None,
+    ) -> None:
         self._host = host
         self._port = port
         self._handlers: dict[str, Handler] = {}
         self._server: asyncio.Server | None = None
+        self._broadcaster: Any | None = None
+        self._trace = trace
 
     def register(self, method: str, handler: Handler) -> None:
         self._handlers[method] = handler
+
+    def set_broadcaster(self, broadcaster: Any) -> None:
+        self._broadcaster = broadcaster
 
     async def start(self) -> str:
         # 探活：如果端口已能被连接，说明已有 daemon 在跑
@@ -62,16 +75,6 @@ class SocketServer:
         if self._server:
             self._server.close()
             await self._server.wait_closed()
-
-    def __init__(self, host: str, port: int) -> None:
-        self._host = host
-        self._port = port
-        self._handlers: dict[str, Handler] = {}
-        self._server: asyncio.Server | None = None
-        self._broadcaster: Any | None = None
-
-    def set_broadcaster(self, broadcaster: Any) -> None:
-        self._broadcaster = broadcaster
 
     async def _handle_connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -114,6 +117,20 @@ class SocketServer:
             )
             return
 
+        # 埋点 ①：收到命令（解析成功之后）
+        if self._trace is not None:
+            client_id = str(writer.get_extra_info("peername", "<unknown>"))
+            self._trace.emit(
+                TraceRecord(
+                    ts=_now(),
+                    direction="CLIENT→CORE",
+                    layer="ipc",
+                    kind="command",
+                    client_id=client_id,
+                    data={"method": req.method, "id": req.id, "params": req.params},
+                )
+            )
+
         handler = self._handlers.get(req.method)
         if handler is None:
             await self._send(
@@ -151,3 +168,27 @@ class SocketServer:
         line = message.model_dump_json() + "\n"
         writer.write(line.encode())
         await writer.drain()
+
+        # 埋点 ①：发出响应（drain 成功之后）
+        if self._trace is not None:
+            kind = "error" if isinstance(message, JsonRpcError) else "response"
+            client_id = str(writer.get_extra_info("peername", "<unknown>"))
+            data: dict[str, Any] = {}
+            if isinstance(message, JsonRpcError):
+                data = {
+                    "id": message.id,
+                    "code": message.error.code,
+                    "message": message.error.message,
+                }
+            else:
+                data = {"id": message.id}
+            self._trace.emit(
+                TraceRecord(
+                    ts=_now(),
+                    direction="CORE→CLIENT",
+                    layer="ipc",
+                    kind=kind,
+                    client_id=client_id,
+                    data=data,
+                )
+            )

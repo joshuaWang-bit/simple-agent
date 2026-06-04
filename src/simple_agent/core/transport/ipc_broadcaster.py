@@ -10,6 +10,8 @@ from typing import Any
 from pydantic import BaseModel
 
 from simple_agent.core.bus.envelope import EventPushEnvelope
+from simple_agent.core.trace.record import TraceRecord, _now
+from simple_agent.core.trace.writer import TraceWriter
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +25,9 @@ class _Subscription:
 
 
 class IpcEventBroadcaster:
-    def __init__(self) -> None:
+    def __init__(self, trace: TraceWriter | None = None) -> None:
         self._subscriptions: list[_Subscription] = []
+        self._trace = trace
 
     def subscribe(
         self, writer: asyncio.StreamWriter, topics: list[str], scope: str
@@ -56,6 +59,23 @@ class IpcEventBroadcaster:
                 envelope = EventPushEnvelope(event=event_dict)
                 sub.writer.write(envelope.model_dump_json().encode() + b"\n")
                 await sub.writer.drain()
+
+                # 埋点 ②：成功推送后写 push 记录
+                if self._trace is not None:
+                    client_id = str(
+                        sub.writer.get_extra_info("peername", "<unknown>")
+                    )
+                    self._trace.emit(
+                        TraceRecord(
+                            ts=_now(),
+                            direction="CORE→CLIENT",
+                            layer="ipc",
+                            kind="push",
+                            run_id=run_id,
+                            client_id=client_id,
+                            data={"sub_id": sub.sub_id, "event_type": event_type},
+                        )
+                    )
             except (ConnectionResetError, BrokenPipeError, OSError):
                 dead.append(sub.writer)
 

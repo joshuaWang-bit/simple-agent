@@ -177,6 +177,8 @@ class FakeProvider:
         tool_schemas: list[dict[str, Any]],
         bus: EventBus,
         run_id: str,
+        *,
+        step: int = 0,
     ) -> LlmResponse:
         resp = self._responses[self._idx]
         self._idx += 1

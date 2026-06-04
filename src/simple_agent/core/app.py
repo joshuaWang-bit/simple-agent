@@ -20,6 +20,9 @@ from simple_agent.core.events.bus import EventBus
 from simple_agent.core.events.types import RunStartedEvent
 from simple_agent.core.llm.provider import OpenAICompatibleProvider
 from simple_agent.core.runner import AgentRunner, new_run_id
+from simple_agent.core.trace.provider import TracingProvider
+from simple_agent.core.trace.record import TraceRecord, _now
+from simple_agent.core.trace.writer import TraceWriter
 from simple_agent.core.transport.ipc_broadcaster import IpcEventBroadcaster
 from simple_agent.core.transport.socket_server import SocketServer, get_connection_writer
 
@@ -61,9 +64,24 @@ class CoreApp:
         self._bus.subscribe(self._broadcaster.handle)
         self._current_run_task: asyncio.Task[None] | None = None
         self._provider = provider
+        self._trace: TraceWriter | None = None
 
     async def run(self) -> None:
-        server = SocketServer(self._config.host, self._config.port)
+        # 初始化 trace（如果启用）
+        if self._config.trace_enabled:
+            trace_path = Path(self._config.trace_file).expanduser()
+            self._trace = TraceWriter(trace_path)
+            await self._trace.start()
+            self._bus.subscribe(self._trace_event_handler)
+            self._broadcaster = IpcEventBroadcaster(trace=self._trace)
+            self._bus.subscribe(self._broadcaster.handle)
+        else:
+            self._broadcaster = IpcEventBroadcaster()
+            self._bus.subscribe(self._broadcaster.handle)
+
+        server = SocketServer(
+            self._config.host, self._config.port, trace=self._trace
+        )
         server.set_broadcaster(self._broadcaster)
         server.register("core.ping", self._ping_handler)
         server.register("event.subscribe", self._subscribe_handler)
@@ -82,6 +100,23 @@ class CoreApp:
 
         await shutdown.wait()
         await server.stop()
+
+        if self._trace is not None:
+            await self._trace.stop()
+
+    async def _trace_event_handler(self, event: BaseModel) -> None:
+        assert self._trace is not None
+        event_dict = event.model_dump()
+        self._trace.emit(
+            TraceRecord(
+                ts=_now(),
+                direction="CORE",
+                layer="event",
+                kind="event",
+                run_id=event_dict.get("run_id"),
+                data=event_dict,
+            )
+        )
 
     async def _ping_handler(self, params: dict[str, Any]) -> PongResult:
         cmd = PingCommand.model_validate(params)
@@ -112,7 +147,9 @@ class CoreApp:
             raise RuntimeError("a run is already in progress")
 
         run_id = new_run_id()
-        runner = AgentRunner(self._config, bus=self._bus, provider=self._provider)
+        runner = AgentRunner(
+            self._config, bus=self._bus, provider=self._provider, trace=self._trace
+        )
         self._current_run_task = asyncio.create_task(
             runner.run(cmd.goal, run_id=run_id)
         )
@@ -140,8 +177,6 @@ class CoreApp:
         if count:
             await writer.drain()
         return count
-
-
 
 
 def run() -> None:

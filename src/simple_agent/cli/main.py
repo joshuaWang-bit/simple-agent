@@ -5,6 +5,7 @@ import sys
 
 from simple_agent.cli.commands.ping import cmd_ping
 from simple_agent.cli.commands.run import cmd_run
+from simple_agent.cli.commands.trace import cmd_trace
 from simple_agent.cli.commands.version import cmd_version
 from simple_agent.core.config import get_config, setup_logging
 
@@ -22,6 +23,12 @@ def main() -> None:
         "--tier", choices=["fast", "pro", "ultra"], help="LLM tier override"
     )
 
+    trace_parser = subparsers.add_parser("trace", help="View daemon trace timeline")
+    trace_parser.add_argument("run_id", nargs="?", help="Filter by run ID")
+    trace_parser.add_argument("--layer", choices=["ipc", "event", "llm"], help="Filter by layer")
+    trace_parser.add_argument("--follow", action="store_true", help="Follow new records like tail -f")
+    trace_parser.add_argument("--raw", action="store_true", help="Output raw NDJSON")
+
     args = parser.parse_args()
 
     if args.version:
@@ -37,6 +44,8 @@ def main() -> None:
         cmd_ping(config)
     elif args.command == "run":
         cmd_run(args.goal, config)
+    elif args.command == "trace":
+        sys.exit(cmd_trace(config, args))
     else:
         parser.print_help()
         sys.exit(1)

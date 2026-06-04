@@ -26,6 +26,9 @@ class AgentConfig(BaseModel):
     llm_model_fast: str = "Qwen/Qwen3.6-35B-A3B"
     llm_enable_thinking: bool = False
     agent_max_steps: int = 20
+    trace_enabled: bool = False
+    trace_file: str = "~/.sagent/traces/daemon.jsonl"
+    trace_include_llm_payload: bool = True
 
     model_config = {"extra": "ignore"}
 

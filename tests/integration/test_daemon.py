@@ -16,6 +16,8 @@ class FakeProvider:
         tool_schemas,
         bus,
         run_id,
+        *,
+        step=0,
     ):
         await asyncio.sleep(0.1)
         return LlmResponse(text="done", stop_reason="end_turn")
