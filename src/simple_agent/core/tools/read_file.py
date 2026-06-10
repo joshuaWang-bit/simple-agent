@@ -28,6 +28,9 @@ class ReadFileTool(BaseTool):
     async def run(self, input: dict[str, Any]) -> ToolResult:
         path = Path(input["path"])
         try:
-            return ToolResult(content=path.read_text(encoding="utf-8"))
+            content = path.read_text(encoding="utf-8")
+            if len(content) > 512 * 1024:
+                content = content[:512 * 1024] + "\n[file truncated]"
+            return ToolResult(content=content)
         except Exception as e:
             return ToolResult(content=str(e), is_error=True)

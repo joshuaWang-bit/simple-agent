@@ -61,6 +61,7 @@ class OpenAICompatibleProvider:
         run_id: str,
         *,
         step: int = 0,
+        system: str | None = None,
     ) -> LlmResponse:
         await bus.publish(
             LlmRequestEvent(run_id=run_id, model=self._model, ts=_now())
@@ -68,18 +69,44 @@ class OpenAICompatibleProvider:
 
         tools = _to_openai_tools(tool_schemas) if tool_schemas else []
 
+        api_messages = list(messages)
+        if system:
+            api_messages.insert(0, {"role": "system", "content": system})
+
         extra_body: dict[str, Any] = {}
         if not self._enable_thinking:
             extra_body["enable_thinking"] = False
 
-        response = await self._client.chat.completions.create(
-            model=self._model,
-            messages=messages,
-            tools=tools or [],
-            max_tokens=4096,
-            stream=True,
-            extra_body=extra_body or None,
-        )
+        retries = 0
+        backoff_seconds = [20, 40, 60]
+
+        while True:
+            try:
+                response = await self._client.chat.completions.create(
+                    model=self._model,
+                    messages=api_messages,
+                    tools=tools or [],
+                    max_tokens=4096,
+                    stream=True,
+                    extra_body=extra_body or None,
+                )
+                break
+            except Exception as exc:
+                if not self._is_retryable(exc) or retries >= len(backoff_seconds):
+                    raise
+                wait = backoff_seconds[retries]
+                retries += 1
+                import logging
+
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    "LLM request failed (%s), retrying in %ds (%d/%d)...",
+                    exc,
+                    wait,
+                    retries,
+                    len(backoff_seconds),
+                )
+                await asyncio.sleep(wait)
 
         text_parts: list[str] = []
         tool_calls: dict[int, dict[str, str]] = {}
@@ -139,6 +166,19 @@ class OpenAICompatibleProvider:
             tool_calls=result_tool_calls,
             stop_reason=stop_reason,
         )
+
+    def _is_retryable(self, exc: Exception) -> bool:
+        """Determine if an exception is worth retrying."""
+        # openai-specific errors
+        if hasattr(exc, "status_code"):
+            code = getattr(exc, "status_code", 0)
+            if code in (429, 502, 503, 504):
+                return True
+        # Rate limit or connection errors by name
+        name = type(exc).__name__
+        if name in ("RateLimitError", "APIConnectionError", "APITimeoutError"):
+            return True
+        return False
 
 
 def _to_openai_tools(schemas: list[dict[str, Any]]) -> list[dict[str, Any]]:

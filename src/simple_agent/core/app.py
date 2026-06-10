@@ -20,6 +20,8 @@ from simple_agent.core.events.bus import EventBus
 from simple_agent.core.events.types import RunStartedEvent
 from simple_agent.core.llm.provider import OpenAICompatibleProvider
 from simple_agent.core.runner import AgentRunner, new_run_id
+from simple_agent.core.session.manager import SessionManager
+from simple_agent.core.session.store import SessionStore
 from simple_agent.core.trace.provider import TracingProvider
 from simple_agent.core.trace.record import TraceRecord, _now
 from simple_agent.core.trace.writer import TraceWriter
@@ -53,6 +55,25 @@ class AgentRunResult(BaseModel):
     run_id: str
 
 
+class SessionCreateCommand(BaseModel):
+    mode: str
+    title: str = ""
+
+
+class SessionCreateResult(BaseModel):
+    session_id: str
+    status: str
+
+
+class SessionSendMessageCommand(BaseModel):
+    session_id: str
+    content: str
+
+
+class SessionSendMessageResult(BaseModel):
+    run_id: str
+
+
 class CoreApp:
     def __init__(self, provider: OpenAICompatibleProvider | None = None) -> None:
         self._start_time = time.monotonic()
@@ -62,9 +83,15 @@ class CoreApp:
         self._bus = EventBus()
         self._broadcaster = IpcEventBroadcaster()
         self._bus.subscribe(self._broadcaster.handle)
-        self._current_run_task: asyncio.Task[None] | None = None
+        self._running_runs: set[asyncio.Task[None]] = set()
         self._provider = provider
         self._trace: TraceWriter | None = None
+        self._store = SessionStore()
+        self._sessions = SessionManager(
+            store=self._store,
+            bus=self._bus,
+            runner_factory=self._runner_factory,
+        )
 
     async def run(self) -> None:
         # 初始化 trace（如果启用）
@@ -86,6 +113,8 @@ class CoreApp:
         server.register("core.ping", self._ping_handler)
         server.register("event.subscribe", self._subscribe_handler)
         server.register("agent.run", self._agent_run_handler)
+        server.register("session.create", self._session_create_handler)
+        server.register("session.send_message", self._session_send_message_handler)
 
         addr = await server.start()
         logger.info("sagent-core %s listening addr=%s", __version__, addr)
@@ -140,20 +169,37 @@ class CoreApp:
         sub_id = self._broadcaster.subscribe(writer, cmd.topics, cmd.scope)
         return EventSubscribeResult(subscription_id=sub_id, replayed_count=replayed_count)
 
-    async def _agent_run_handler(self, params: dict[str, Any]) -> AgentRunResult:
-        cmd = AgentRunCommand.model_validate(params)
-
-        if self._current_run_task and not self._current_run_task.done():
-            raise RuntimeError("a run is already in progress")
-
-        run_id = new_run_id()
-        runner = AgentRunner(
+    def _runner_factory(self) -> AgentRunner:
+        return AgentRunner(
             self._config, bus=self._bus, provider=self._provider, trace=self._trace
         )
-        self._current_run_task = asyncio.create_task(
-            runner.run(cmd.goal, run_id=run_id)
+
+    async def _agent_run_handler(self, params: dict[str, Any]) -> AgentRunResult:
+        cmd = AgentRunCommand.model_validate(params)
+        session = await self._sessions.create(mode="one_shot", title=cmd.goal[:40])
+        run_id = new_run_id()
+        run_task = asyncio.create_task(
+            self._sessions.send_message(session.id, cmd.goal, run_id=run_id)
         )
+        self._running_runs.add(run_task)
+        run_task.add_done_callback(self._running_runs.discard)
         return AgentRunResult(run_id=run_id)
+
+    async def _session_create_handler(
+        self, params: dict[str, Any]
+    ) -> SessionCreateResult:
+        cmd = SessionCreateCommand.model_validate(params)
+        session = await self._sessions.create(mode=cmd.mode, title=cmd.title)
+        return SessionCreateResult(session_id=session.id, status=session.status)
+
+    async def _session_send_message_handler(
+        self, params: dict[str, Any]
+    ) -> SessionSendMessageResult:
+        cmd = SessionSendMessageCommand.model_validate(params)
+        run_id = await self._sessions.send_message(
+            cmd.session_id, cmd.content, run_id=None
+        )
+        return SessionSendMessageResult(run_id=run_id)
 
     async def _replay_events(
         self, run_id: str, writer: asyncio.StreamWriter, topics: list[str]
@@ -161,6 +207,16 @@ class CoreApp:
         import fnmatch
 
         path = events_file(run_id)
+        if not path.exists():
+            # fallback: search in session directories
+            for sess_dir in self._store._base.iterdir():
+                if not sess_dir.is_dir():
+                    continue
+                candidate = sess_dir / "runs" / run_id / "events.jsonl"
+                if candidate.exists():
+                    path = candidate
+                    break
+
         if not path.exists():
             return 0
 

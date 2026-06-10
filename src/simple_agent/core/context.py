@@ -13,9 +13,13 @@ class ExecutionContext:
     step: int = 0
     status: str = "running"  # "running" | "success" | "failed"
     reason: str | None = None
+    prefill_messages: list[dict[str, Any]] | None = None
+    session_notes: str = ""
 
     def __post_init__(self) -> None:
-        if not self.messages:
+        if self.prefill_messages is not None:
+            self.messages = list(self.prefill_messages)
+        elif not self.messages:
             self.messages.append({"role": "user", "content": self.goal})
 
     def is_done(self) -> bool:
@@ -39,4 +43,14 @@ class ExecutionContext:
     def add_tool_result(self, tool_call_id: str, content: str) -> None:
         self.messages.append(
             {"role": "tool", "tool_call_id": tool_call_id, "content": content}
+        )
+
+    def system_prompt(self, base: str) -> str:
+        if not self.session_notes.strip():
+            return base
+        return (
+            base
+            + "\n\n## Session Notes\n"
+            + self.session_notes.strip()
+            + "\n\nRemember important durable facts by calling note_save."
         )

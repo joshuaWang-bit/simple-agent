@@ -27,6 +27,17 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+BASE_SYSTEM_PROMPT = (
+    "You are an autonomous agent. When given a complex goal, "
+    "break it down into sub-tasks using task_create. "
+    "Set blocked_by dependencies when tasks must wait for others. "
+    "Use task_update to mark tasks in_progress and completed. "
+    "Use task_list to review progress. "
+    "You have access to read_file, write_file, list_dir, and bash tools. "
+    "Plan step by step, execute tools, and update task status accordingly."
+)
+
+
 class AgentLoop:
     def __init__(
         self,
@@ -57,6 +68,7 @@ class AgentLoop:
                     bus=self._bus,
                     run_id=context.run_id,
                     step=context.step,
+                    system=context.system_prompt(BASE_SYSTEM_PROMPT),
                 )
             except asyncio.CancelledError:
                 context.mark_failed("cancelled")

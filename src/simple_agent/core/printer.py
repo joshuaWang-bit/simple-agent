@@ -27,7 +27,7 @@ class StdoutPrinter:
             case "tool.call_finished":
                 tool_name = event.get("tool_name", "") if isinstance(event, dict) else getattr(event, "tool_name", "")
                 elapsed_ms = event.get("elapsed_ms", 0) if isinstance(event, dict) else getattr(event, "elapsed_ms", 0)
-                print(f"[tool] {tool_name} ✓  {elapsed_ms}ms")
+                print(f"[tool] {tool_name} done  {elapsed_ms}ms")
             case "step.finished":
                 step = event.get("step", 0) if isinstance(event, dict) else getattr(event, "step", 0)
                 print(f"\n[step {step}] done")

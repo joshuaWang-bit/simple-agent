@@ -9,8 +9,9 @@ dependencies = [
 ]
 
 [project.scripts]
-sagent     = "simple_agent.cli.main:main"
+sagent      = "simple_agent.cli.main:main"
 sagent-core = "simple_agent.core.app:run"
+sagent-tui  = "simple_agent.tui.app:main"
 
 [build-system]
 requires = ["hatchling"]

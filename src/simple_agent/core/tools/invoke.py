@@ -48,6 +48,7 @@ async def invoke_tool(
             tool_use_id=tc.id,
             tool_name=tc.name,
             elapsed_ms=elapsed,
+            output=result.content,
             ts=_now(),
         )
     )
