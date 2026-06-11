@@ -49,6 +49,58 @@ class LlmTokenEvent(BaseModel):
     ts: str
 
 
+class LlmUsageEvent(BaseModel):
+    type: Literal["llm.usage"] = "llm.usage"
+    run_id: str
+    input_tokens: int
+    output_tokens: int
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    context_pct: float = 0.0
+    ts: str
+
+
+class ContextCompactedEvent(BaseModel):
+    type: Literal["context.compacted"] = "context.compacted"
+    run_id: str = ""
+    session_id: str = ""
+    original_tokens: int
+    summary_tokens: int
+    summary_path: str = ""
+    persistent: bool = False
+    ts: str
+
+
+class SkillInvokedEvent(BaseModel):
+    type: Literal["skill.invoked"] = "skill.invoked"
+    session_id: str
+    run_id: str
+    skill_name: str
+    arguments: str
+    tool_whitelist: list[str] = []
+    ts: str
+
+
+class SubagentStartedEvent(BaseModel):
+    type: Literal["subagent.started"] = "subagent.started"
+    run_id: str
+    parent_run_id: str
+    description: str
+    subagent_type: str = ""
+    background: bool = False
+    ts: str
+
+
+class SubagentFinishedEvent(BaseModel):
+    type: Literal["subagent.finished"] = "subagent.finished"
+    run_id: str
+    parent_run_id: str
+    status: str
+    elapsed_s: float
+    reason: str | None = None
+    ts: str
+
+
 class ToolCallStartedEvent(BaseModel):
     type: Literal["tool.call_started"] = "tool.call_started"
     run_id: str
@@ -131,6 +183,11 @@ Event = Annotated[
     | StepFinishedEvent
     | LlmRequestEvent
     | LlmTokenEvent
+    | LlmUsageEvent
+    | ContextCompactedEvent
+    | SkillInvokedEvent
+    | SubagentStartedEvent
+    | SubagentFinishedEvent
     | ToolCallStartedEvent
     | ToolCallFinishedEvent
     | ToolCallFailedEvent

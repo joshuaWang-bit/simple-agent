@@ -9,6 +9,14 @@ INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 
 
+class HandlerError(Exception):
+    def __init__(self, code: int, message: str, data: Any = None) -> None:
+        self.code = code
+        self.message = message
+        self.data = data
+        super().__init__(message)
+
+
 class JsonRpcErrorObject(BaseModel):
     code: int
     message: str

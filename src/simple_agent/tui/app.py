@@ -265,6 +265,7 @@ class KamaTuiApp(App[None]):
         self._session_id: str | None = None
         self._client: SocketClient | None = None
         self._pending_permission_blocks: dict[str, PermissionBlock] = {}
+        self._last_context_pct = 0.0
 
     def compose(self) -> Any:
         yield Static("● not connected", id="status")
@@ -311,7 +312,17 @@ class KamaTuiApp(App[None]):
 
             try:
                 sub_params: dict[str, Any] = {
-                    "topics": ["session.*", "run.*", "step.*", "tool.*", "llm.*", "permission.*"],
+                    "topics": [
+                        "session.*",
+                        "run.*",
+                        "step.*",
+                        "tool.*",
+                        "llm.*",
+                        "context.*",
+                        "permission.*",
+                        "skill.*",
+                        "subagent.*",
+                    ],
                     "scope": "global",
                 }
                 if self._replay_run_id:
@@ -392,6 +403,30 @@ class KamaTuiApp(App[None]):
                 )
         elif t == "llm.request":
             self._append(Static(f"[dim]llm request {event.get('model')}[/dim]"))
+        elif t == "llm.usage":
+            pct = float(event.get("context_pct") or 0.0)
+            self._last_context_pct = pct
+            self._append(
+                Static(
+                    "tokens "
+                    f"in={event.get('input_tokens')} "
+                    f"out={event.get('output_tokens')} "
+                    f"cache={event.get('cache_read_input_tokens')} "
+                    f"{self._render_ctx_bar(pct)}",
+                    classes="usage",
+                )
+            )
+        elif t == "context.compacted":
+            self._last_context_pct = 0.0
+            original = event.get("original_tokens", 0)
+            summary = event.get("summary_tokens", 0)
+            mode = "persistent" if event.get("persistent") else "memory"
+            self._append(
+                Static(
+                    f"[green]context compacted[/green] {mode} "
+                    f"original={original} tokens -> summary={summary} tokens"
+                )
+            )
         elif t == "permission.requested":
             tool_use_id = event.get("tool_use_id", "")
             tool_name = event.get("tool_name", "")
@@ -401,6 +436,31 @@ class KamaTuiApp(App[None]):
             self._append(perm_block)
             select = PermissionSelect(tool_use_id)
             self._mount_permission_select(select)
+        elif t == "skill.invoked":
+            self._append(
+                Static(
+                    f"[cyan]skill[/cyan] /{event.get('skill_name')} "
+                    f"tools={event.get('tool_whitelist', [])}"
+                )
+            )
+        elif t == "subagent.started":
+            mode = "bg" if event.get("background") else "fg"
+            role = event.get("subagent_type") or "agent"
+            self._append(
+                Static(
+                    f"[magenta]subagent[/magenta] {mode} {role} "
+                    f"{event.get('run_id')} {event.get('description')}"
+                )
+            )
+        elif t == "subagent.finished":
+            status = event.get("status", "")
+            color = "green" if status == "success" else "red"
+            self._append(
+                Static(
+                    f"[{color}]subagent[/{color}] {event.get('run_id')} "
+                    f"{status} {event.get('elapsed_s', 0.0):.1f}s"
+                )
+            )
         else:
             self._append(Static(str(event)))
 
@@ -422,6 +482,25 @@ class KamaTuiApp(App[None]):
             self._append(Static(f"[red]error: {exc}[/red]"))
             self._set_input_disabled(False)
 
+    async def _do_compact(self, focus: str) -> None:
+        if not self._client or not self._session_id:
+            return
+        try:
+            await self._client.send_command("session.compact", {
+                "session_id": self._session_id,
+                "focus": focus,
+            })
+        except Exception as exc:
+            self._append(Static(f"[red]compact error: {exc}[/red]"))
+        finally:
+            self._set_input_disabled(False)
+
+    def _render_ctx_bar(self, pct: float) -> str:
+        pct = max(0.0, pct)
+        filled = min(10, int(round(pct * 10)))
+        bar = "#" * filled + "-" * (10 - filled)
+        return f"context=[{bar}] {pct * 100:.1f}%"
+
     def on_chat_text_area_submitted(self, message: ChatTextArea.Submitted) -> None:
         if not self._client or not self._session_id:
             return
@@ -435,6 +514,14 @@ class KamaTuiApp(App[None]):
         except Exception:
             pass
         self._append(Static(f"[bold]You:[/bold] {value}"))
+        if value.startswith("/compact"):
+            focus = value.removeprefix("/compact").strip()
+            self.run_worker(
+                self._do_compact(focus),
+                name="compact_session",
+                exclusive=False,
+            )
+            return
         self.run_worker(
             self._do_send_message(value),
             name="send_message",

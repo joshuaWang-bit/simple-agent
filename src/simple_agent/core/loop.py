@@ -18,6 +18,7 @@ from simple_agent.core.events.types import (
 )
 from simple_agent.core.llm.provider import OpenAICompatibleProvider, ToolCall
 from simple_agent.core.permissions import PermissionManager
+from simple_agent.core.session.compactor import Compactor
 from simple_agent.core.tools.invoke import invoke_tool
 from simple_agent.core.tools.registry import ToolRegistry
 
@@ -47,12 +48,16 @@ class AgentLoop:
         bus: EventBus,
         permission_manager: PermissionManager | None = None,
         session_id: str | None = None,
+        compactor: Compactor | None = None,
+        compact_threshold: float = 0.0,
     ) -> None:
         self._provider = provider
         self._registry = registry
         self._bus = bus
         self._permission_manager = permission_manager
         self._session_id = session_id
+        self._compactor = compactor
+        self._compact_threshold = compact_threshold
 
     async def run(self, context: ExecutionContext) -> None:
         while not context.is_done():
@@ -115,9 +120,18 @@ class AgentLoop:
                     )
                     context.add_tool_result(tc.id, result.content)
 
+                if (
+                    not context.is_done()
+                    and self._compactor is not None
+                    and self._compact_threshold > 0
+                    and response.usage is not None
+                    and response.usage.context_pct >= self._compact_threshold
+                ):
+                    await self._compactor.compact(context, self._provider)
+
             # — 终止检查 —
             if response.stop_reason == "end_turn":
-                context.mark_success()
+                context.mark_success(response.text or "")
             elif context.step >= context.max_steps:
                 context.mark_failed("exceeded_max_steps")
 

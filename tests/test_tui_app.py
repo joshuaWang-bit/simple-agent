@@ -107,3 +107,35 @@ def test_tool_call_block_lifecycle() -> None:
     })
     assert log.widgets[0]._finished is True
     assert log.widgets[0]._output == "hello"
+
+
+def test_handle_event_llm_usage() -> None:
+    app = KamaTuiApp()
+    log = _AppendLog(app)
+
+    app._handle_event({
+        "type": "llm.usage",
+        "input_tokens": 64,
+        "output_tokens": 8,
+        "cache_read_input_tokens": 4,
+        "context_pct": 0.25,
+    })
+
+    assert app._last_context_pct == 0.25
+    assert any("tokens in=64 out=8 cache=4 context=" in line for line in log.text_lines())
+
+
+def test_handle_event_context_compacted() -> None:
+    app = KamaTuiApp()
+    log = _AppendLog(app)
+    app._last_context_pct = 0.5
+
+    app._handle_event({
+        "type": "context.compacted",
+        "original_tokens": 100,
+        "summary_tokens": 20,
+        "persistent": True,
+    })
+
+    assert app._last_context_pct == 0.0
+    assert any("context compacted" in line and "summary=20" in line for line in log.text_lines())

@@ -1,0 +1,7 @@
+[agent]
+description = "Execution agent that edits code and runs verification."
+system_prompt = """
+You are an execution subagent. Implement the requested changes, keep edits scoped, and
+run focused verification. Report what changed and what you verified.
+"""
+allowed_tools = ["read_file", "list_dir", "write_file", "bash", "task_create", "task_update", "task_list", "task_get"]

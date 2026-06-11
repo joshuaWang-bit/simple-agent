@@ -7,6 +7,7 @@ from contextvars import ContextVar
 from typing import Any, Awaitable, Callable
 
 from simple_agent.core.bus.envelope import (
+    HandlerError,
     INVALID_PARAMS,
     INVALID_REQUEST,
     INTERNAL_ERROR,
@@ -150,6 +151,12 @@ class SocketServer:
         token = _writer_var.set(writer)
         try:
             result = await handler(req.params)
+        except HandlerError as e:
+            await self._send(
+                writer,
+                make_error(req.id, e.code, e.message, e.data),
+            )
+            return
         except Exception as e:
             from pydantic import ValidationError
 

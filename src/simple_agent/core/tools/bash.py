@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import re
+import sys
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -45,7 +47,7 @@ class BashTool(BaseTool):
     async def run(self, input: dict[str, Any]) -> ToolResult:
         p = BashParams.model_validate(input)
         proc = await asyncio.create_subprocess_shell(
-            p.command,
+            _platform_command(p.command),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
@@ -73,3 +75,13 @@ class BashTool(BaseTool):
                 is_error=True,
             )
         return ToolResult(content=output or "[no output]")
+
+
+def _platform_command(command: str) -> str:
+    if sys.platform != "win32":
+        return command
+    match = re.fullmatch(r"\s*sleep\s+(\d+(?:\.\d+)?)\s*", command)
+    if match is None:
+        return command
+    seconds = match.group(1)
+    return f'powershell -NoProfile -Command "Start-Sleep -Seconds {seconds}"'

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +26,13 @@ class AgentConfig(BaseModel):
     llm_model_fast: str = "Qwen/Qwen3.6-35B-A3B"
     llm_enable_thinking: bool = False
     agent_max_steps: int = 20
+    compaction_auto_threshold: float = 0.0
+    compaction_tool_result_limit: int = 8_000
+    compaction_tool_result_keep: int = 4_000
     trace_enabled: bool = False
     trace_file: str = "~/.sagent/traces/daemon.jsonl"
     trace_include_llm_payload: bool = True
+    mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
 
     model_config = {"extra": "ignore"}
 

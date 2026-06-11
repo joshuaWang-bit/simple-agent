@@ -21,6 +21,21 @@ class ChatPrinter:
             print(f"[tool] {event.get('tool_name', '')} done")
         elif t == "session.waiting_for_input":
             print("\n[waiting for input]")
+        elif t == "llm.usage":
+            pct = float(event.get("context_pct") or 0.0)
+            print(
+                "\n[tokens] "
+                f"in={event.get('input_tokens')} "
+                f"out={event.get('output_tokens')} "
+                f"cache={event.get('cache_read_input_tokens')} "
+                f"context={pct * 100:.1f}%"
+            )
+        elif t == "context.compacted":
+            print(
+                "\n[context compacted] "
+                f"original={event.get('original_tokens')} "
+                f"summary={event.get('summary_tokens')}"
+            )
         elif t == "run.finished":
             print()
 
@@ -56,7 +71,7 @@ async def _chat_async(config: AgentConfig) -> int:
     loop_task = asyncio.create_task(client.run_event_loop())
 
     await client.send_command("event.subscribe", {
-        "topics": ["session.*", "run.*", "step.*", "tool.*", "llm.*"],
+        "topics": ["session.*", "run.*", "step.*", "tool.*", "llm.*", "context.*"],
         "scope": "global",
     })
     created = await client.send_command("session.create", {"mode": "chat"})
@@ -67,6 +82,13 @@ async def _chat_async(config: AgentConfig) -> int:
         while True:
             line = await _readline("> ")
             if not line.strip():
+                continue
+            if line.strip().startswith("/compact"):
+                focus = line.strip().removeprefix("/compact").strip()
+                await client.send_command("session.compact", {
+                    "session_id": session_id,
+                    "focus": focus,
+                })
                 continue
             await client.send_command("session.send_message", {
                 "session_id": session_id,

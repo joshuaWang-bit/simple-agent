@@ -2,17 +2,31 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from pathlib import Path
 from typing import Any
 
 from simple_agent.core.session import Session
+from simple_agent.core.session.truncate import (
+    TOOL_RESULT_KEEP,
+    TOOL_RESULT_LIMIT,
+    truncate_tool_results,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class SessionStore:
-    def __init__(self, base_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        base_dir: Path | None = None,
+        *,
+        tool_result_limit: int = TOOL_RESULT_LIMIT,
+        tool_result_keep: int = TOOL_RESULT_KEEP,
+    ) -> None:
         self._base = (base_dir or Path.home() / ".sagent" / "sessions").expanduser()
+        self._tool_result_limit = tool_result_limit
+        self._tool_result_keep = tool_result_keep
         self._base.mkdir(parents=True, exist_ok=True)
 
     def session_dir(self, sid: str) -> Path:
@@ -57,13 +71,28 @@ class SessionStore:
                 continue
             messages.append(msg)
 
-        return self._trim_orphan_tool_calls(messages)
+        messages = self._trim_orphan_tool_calls(messages)
+        return truncate_tool_results(
+            messages,
+            limit=self._tool_result_limit,
+            keep=self._tool_result_keep,
+        )
 
     def append_message(self, sid: str, message: dict[str, Any]) -> None:
         path = self.session_dir(sid) / "thread.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(message, ensure_ascii=False) + "\n")
+
+    def write_compacted(self, sid: str, messages: list[dict[str, Any]]) -> Path:
+        path = self.session_dir(sid) / "thread.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            backup = path.with_name(f"thread_{_stamp()}.jsonl.bak")
+            shutil.copy2(path, backup)
+        lines = [json.dumps(msg, ensure_ascii=False) for msg in messages]
+        path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        return path
 
     def read_notes(self, sid: str) -> str:
         path = self.session_dir(sid) / "notes.md"
@@ -98,3 +127,9 @@ class SessionStore:
                     continue
             break
         return messages
+
+
+def _stamp() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")

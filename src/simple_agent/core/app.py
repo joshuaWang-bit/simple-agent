@@ -19,6 +19,7 @@ from simple_agent.core.config import get_config, setup_logging
 from simple_agent.core.events.bus import EventBus
 from simple_agent.core.events.types import RunStartedEvent
 from simple_agent.core.llm.provider import OpenAICompatibleProvider
+from simple_agent.core.mcp import McpServerManager
 from simple_agent.core.permissions import PermissionManager
 from simple_agent.core.runner import AgentRunner, new_run_id
 from simple_agent.core.session.manager import SessionManager
@@ -75,6 +76,15 @@ class SessionSendMessageResult(BaseModel):
     run_id: str
 
 
+class SessionCompactCommand(BaseModel):
+    session_id: str
+    focus: str = ""
+
+
+class SessionCompactResult(BaseModel):
+    status: str = "ok"
+
+
 class PermissionRespondCommand(BaseModel):
     tool_use_id: str
     decision: str
@@ -96,10 +106,14 @@ class CoreApp:
         self._running_runs: set[asyncio.Task[None]] = set()
         self._provider = provider
         self._trace: TraceWriter | None = None
-        self._store = SessionStore()
+        self._store = SessionStore(
+            tool_result_limit=self._config.compaction_tool_result_limit,
+            tool_result_keep=self._config.compaction_tool_result_keep,
+        )
         self._permission_manager = PermissionManager(
             policy_file=Path(".permissions.json").expanduser(),
         )
+        self._mcp_manager = McpServerManager()
         self._sessions = SessionManager(
             store=self._store,
             bus=self._bus,
@@ -119,6 +133,9 @@ class CoreApp:
             self._broadcaster = IpcEventBroadcaster()
             self._bus.subscribe(self._broadcaster.handle)
 
+        if self._config.mcp_servers:
+            await self._mcp_manager.start_all(self._config.mcp_servers)
+
         server = SocketServer(
             self._config.host, self._config.port, trace=self._trace
         )
@@ -128,6 +145,7 @@ class CoreApp:
         server.register("agent.run", self._agent_run_handler)
         server.register("session.create", self._session_create_handler)
         server.register("session.send_message", self._session_send_message_handler)
+        server.register("session.compact", self._session_compact_handler)
         server.register("permission.respond", self._permission_respond_handler)
 
         addr = await server.start()
@@ -143,6 +161,7 @@ class CoreApp:
 
         await shutdown.wait()
         await server.stop()
+        await self._mcp_manager.stop_all()
 
         if self._trace is not None:
             await self._trace.stop()
@@ -190,6 +209,7 @@ class CoreApp:
             provider=self._provider,
             trace=self._trace,
             permission_manager=self._permission_manager,
+            mcp_manager=self._mcp_manager,
         )
 
     async def _agent_run_handler(self, params: dict[str, Any]) -> AgentRunResult:
@@ -218,6 +238,17 @@ class CoreApp:
             cmd.session_id, cmd.content, run_id=None
         )
         return SessionSendMessageResult(run_id=run_id)
+
+    async def _session_compact_handler(
+        self, params: dict[str, Any]
+    ) -> SessionCompactResult:
+        cmd = SessionCompactCommand.model_validate(params)
+        await self._sessions.compact(
+            cmd.session_id,
+            self._provider_for_compaction(),
+            focus=cmd.focus,
+        )
+        return SessionCompactResult()
 
     async def _permission_respond_handler(
         self, params: dict[str, Any]
@@ -258,6 +289,33 @@ class CoreApp:
         if count:
             await writer.drain()
         return count
+
+    def _provider_for_compaction(self) -> Any:
+        if self._provider is not None:
+            provider: Any = self._provider
+        else:
+            provider = OpenAICompatibleProvider(
+                model=self._resolve_model(),
+                api_base=self._config.llm_api_base,
+                api_key=self._config.llm_api_key,
+                enable_thinking=self._config.llm_enable_thinking,
+            )
+
+        if self._trace is not None:
+            return TracingProvider(
+                provider,
+                self._trace,
+                include_payload=self._config.trace_include_llm_payload,
+            )
+        return provider
+
+    def _resolve_model(self) -> str:
+        tier = self._config.llm_tier.lower()
+        if tier == "ultra":
+            return self._config.llm_model_ultra
+        if tier == "pro":
+            return self._config.llm_model_pro or self._config.llm_model_fast
+        return self._config.llm_model_fast
 
 
 def run() -> None:
