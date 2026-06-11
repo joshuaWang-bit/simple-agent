@@ -93,11 +93,17 @@ class SocketServer:
     async def _read_loop(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
+        tasks: set[asyncio.Task[None]] = set()
         while True:
             line = await reader.readline()
             if not line:
-                return
-            await self._handle_line(line, writer)
+                break
+            task = asyncio.create_task(self._handle_line(line, writer))
+            tasks.add(task)
+            task.add_done_callback(tasks.discard)
+
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _handle_line(self, line: bytes, writer: asyncio.StreamWriter) -> None:
         try:
@@ -141,8 +147,8 @@ class SocketServer:
             )
             return
 
+        token = _writer_var.set(writer)
         try:
-            _writer_var.set(writer)
             result = await handler(req.params)
         except Exception as e:
             from pydantic import ValidationError
@@ -159,6 +165,8 @@ class SocketServer:
                     make_error(req.id, INTERNAL_ERROR, "Internal error"),
                 )
             return
+        finally:
+            _writer_var.reset(token)
 
         await self._send(
             writer, JsonRpcSuccess(id=req.id, result=result.model_dump())

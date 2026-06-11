@@ -45,13 +45,13 @@ class SocketClient:
 
         req_id = f"req-{id(asyncio.current_task())}-{asyncio.get_event_loop().time()}"
         req = JsonRpcRequest(id=req_id, method=method, params=params or {})
-        line = req.model_dump_json() + "\n"
-        self._writer.write(line.encode())
-        await self._writer.drain()
-
         fut: asyncio.Future[dict[str, Any]] = asyncio.get_event_loop().create_future()
         self._pending[req_id] = fut
+
+        line = req.model_dump_json() + "\n"
         try:
+            self._writer.write(line.encode())
+            await self._writer.drain()
             return await fut
         finally:
             self._pending.pop(req_id, None)

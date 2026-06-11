@@ -133,6 +133,74 @@ async def test_method_not_found(config: AgentConfig) -> None:
 
 
 @pytest.mark.asyncio
+async def test_connection_requests_run_concurrently(config: AgentConfig) -> None:
+    """A long request must not block a later request on the same connection."""
+    gate = asyncio.Event()
+
+    async def slow_handler(params: dict) -> PongResult:
+        await gate.wait()
+        return PongResult(
+            server_version=__version__,
+            uptime_ms=1,
+            received_at="slow",
+        )
+
+    async def fast_handler(params: dict) -> PongResult:
+        gate.set()
+        return PongResult(
+            server_version=__version__,
+            uptime_ms=1,
+            received_at="fast",
+        )
+
+    server = SocketServer(config.host, config.port)
+    server.register("test.slow", slow_handler)
+    server.register("test.fast", fast_handler)
+    await server.start()
+
+    reader, writer = await asyncio.open_connection(config.host, config.port)
+    try:
+        writer.write(
+            (
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "slow",
+                        "method": "test.slow",
+                        "params": {},
+                    }
+                )
+                + "\n"
+            ).encode()
+        )
+        writer.write(
+            (
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "fast",
+                        "method": "test.fast",
+                        "params": {},
+                    }
+                )
+                + "\n"
+            ).encode()
+        )
+        await writer.drain()
+
+        first = json.loads(await asyncio.wait_for(reader.readline(), timeout=1.0))
+        second = json.loads(await asyncio.wait_for(reader.readline(), timeout=1.0))
+
+        assert first["id"] == "fast"
+        assert second["id"] == "slow"
+    finally:
+        gate.set()
+        writer.close()
+        await writer.wait_closed()
+        await server.stop()
+
+
+@pytest.mark.asyncio
 async def test_port_probe(config: AgentConfig) -> None:
     """Starting a second server on the same port should exit."""
     server1 = SocketServer(config.host, config.port)

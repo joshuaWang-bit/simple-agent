@@ -104,6 +104,124 @@ class ToolCallBlock(Widget):
         return f"tool {self._tool_name} {params_str}  {status}  {self._elapsed_ms}ms (click to expand)"
 
 
+class PermissionBlock(Static):
+    def __init__(self, tool_use_id: str, tool_name: str, param_preview: str) -> None:
+        super().__init__("")
+        self._tool_use_id = tool_use_id
+        self._tool_name = tool_name
+        self._param_preview = param_preview
+        self._decision: str | None = None
+
+    def render(self) -> Any:
+        from rich.text import Text
+
+        if self._decision is None:
+            return Text.from_markup(
+                f"[yellow]⏸ permission[/yellow] {self._tool_name} {self._param_preview}"
+            )
+        color = "green" if self._decision in ("allow_once", "always_allow") else "red"
+        return Text.from_markup(
+            f"[{color}]permission {self._decision}[/{color}] {self._tool_name} {self._param_preview}"
+        )
+
+    def mark_decision(self, decision: str) -> None:
+        self._decision = decision
+        self.refresh()
+
+
+class PermissionSelect(Widget):
+    can_focus = True
+
+    DEFAULT_CSS = """
+    PermissionSelect {
+        height: auto;
+        padding: 0 2;
+    }
+    PermissionSelect > .option {
+        padding: 0 1;
+    }
+    PermissionSelect > .option.highlighted {
+        background: $accent;
+        color: $text;
+        text-style: bold;
+    }
+    """
+
+    def __init__(self, tool_use_id: str) -> None:
+        super().__init__()
+        self._tool_use_id = tool_use_id
+        self._options = [
+            ("allow_once", "Allow once (y)"),
+            ("always_allow", "Always allow (a)"),
+            ("deny_once", "Deny once (n)"),
+            ("always_deny", "Always deny (d)"),
+        ]
+        self._index = 0
+
+    def compose(self) -> Any:
+        for value, label in self._options:
+            yield Static(label, classes=f"option opt-{value}")
+
+    def on_mount(self) -> None:
+        self._update_highlight()
+
+    def _update_highlight(self) -> None:
+        for i, static in enumerate(self.query(".option")):
+            if i == self._index:
+                static.add_class("highlighted")
+            else:
+                static.remove_class("highlighted")
+        self.focus()
+
+    async def on_key(self, event: Any) -> None:
+        key = event.key
+        if key in ("up", "k"):
+            self._index = (self._index - 1) % len(self._options)
+            self._update_highlight()
+            event.stop()
+        elif key in ("down", "j"):
+            self._index = (self._index + 1) % len(self._options)
+            self._update_highlight()
+            event.stop()
+        elif key == "enter":
+            decision = self._options[self._index][0]
+            await self._send_decision(decision)
+            event.stop()
+        elif key == "y":
+            await self._send_decision("allow_once")
+            event.stop()
+        elif key == "a":
+            await self._send_decision("always_allow")
+            event.stop()
+        elif key == "n":
+            await self._send_decision("deny_once")
+            event.stop()
+        elif key == "d":
+            await self._send_decision("always_deny")
+            event.stop()
+
+    async def _send_decision(self, decision: str) -> None:
+        app = self.app
+        if isinstance(app, KamaTuiApp) and app._client:
+            perm_block = app._pending_permission_blocks.get(self._tool_use_id)
+            if perm_block is not None:
+                perm_block.mark_decision(decision)
+            app.run_worker(
+                self._do_send(decision),
+                name="permission_respond",
+                exclusive=False,
+            )
+        self.remove()
+
+    async def _do_send(self, decision: str) -> None:
+        app = self.app
+        if isinstance(app, KamaTuiApp) and app._client:
+            await app._client.send_command("permission.respond", {
+                "tool_use_id": self._tool_use_id,
+                "decision": decision,
+            })
+
+
 class ChatTextArea(TextArea):
     class Submitted(Message):
         def __init__(self, area: ChatTextArea) -> None:
@@ -146,6 +264,7 @@ class KamaTuiApp(App[None]):
         self._tools: dict[str, ToolCallBlock] = {}
         self._session_id: str | None = None
         self._client: SocketClient | None = None
+        self._pending_permission_blocks: dict[str, PermissionBlock] = {}
 
     def compose(self) -> Any:
         yield Static("● not connected", id="status")
@@ -185,11 +304,14 @@ class KamaTuiApp(App[None]):
             self._client = client
             self._update_status(f"● connected {self._host}:{self._port}")
             loop_task = asyncio.create_task(client.run_event_loop())
-            client.on_event(lambda e: self._handle_event(e))
+            async def on_event(event: dict[str, Any]) -> None:
+                self._handle_event(event)
+
+            client.on_event(on_event)
 
             try:
                 sub_params: dict[str, Any] = {
-                    "topics": ["session.*", "run.*", "step.*", "tool.*", "llm.*"],
+                    "topics": ["session.*", "run.*", "step.*", "tool.*", "llm.*", "permission.*"],
                     "scope": "global",
                 }
                 if self._replay_run_id:
@@ -270,10 +392,37 @@ class KamaTuiApp(App[None]):
                 )
         elif t == "llm.request":
             self._append(Static(f"[dim]llm request {event.get('model')}[/dim]"))
+        elif t == "permission.requested":
+            tool_use_id = event.get("tool_use_id", "")
+            tool_name = event.get("tool_name", "")
+            preview = event.get("param_preview", "")
+            perm_block = PermissionBlock(tool_use_id, tool_name, preview)
+            self._pending_permission_blocks[tool_use_id] = perm_block
+            self._append(perm_block)
+            select = PermissionSelect(tool_use_id)
+            self._mount_permission_select(select)
         else:
             self._append(Static(str(event)))
 
-    async def on_chat_text_area_submitted(self, message: ChatTextArea.Submitted) -> None:
+    def _mount_permission_select(self, select: PermissionSelect) -> None:
+        scroll = self.query_one("#scroll", VerticalScroll)
+        scroll.mount(select)
+        scroll.scroll_end(animate=False)
+        select.focus()
+
+    async def _do_send_message(self, content: str) -> None:
+        if not self._client or not self._session_id:
+            return
+        try:
+            await self._client.send_command("session.send_message", {
+                "session_id": self._session_id,
+                "content": content,
+            })
+        except Exception as exc:
+            self._append(Static(f"[red]error: {exc}[/red]"))
+            self._set_input_disabled(False)
+
+    def on_chat_text_area_submitted(self, message: ChatTextArea.Submitted) -> None:
         if not self._client or not self._session_id:
             return
         value = message.value.strip()
@@ -286,14 +435,11 @@ class KamaTuiApp(App[None]):
         except Exception:
             pass
         self._append(Static(f"[bold]You:[/bold] {value}"))
-        try:
-            await self._client.send_command("session.send_message", {
-                "session_id": self._session_id,
-                "content": value,
-            })
-        except Exception as exc:
-            self._append(Static(f"[red]error: {exc}[/red]"))
-            self._set_input_disabled(False)
+        self.run_worker(
+            self._do_send_message(value),
+            name="send_message",
+            exclusive=False,
+        )
 
 
 def main() -> None:
