@@ -17,6 +17,7 @@ from simple_agent.core.events.types import (
     ToolCallStartedEvent,
 )
 from simple_agent.core.llm.provider import OpenAICompatibleProvider, ToolCall
+from simple_agent.core.permissions import PermissionManager
 from simple_agent.core.tools.invoke import invoke_tool
 from simple_agent.core.tools.registry import ToolRegistry
 
@@ -44,10 +45,14 @@ class AgentLoop:
         provider: OpenAICompatibleProvider,
         registry: ToolRegistry,
         bus: EventBus,
+        permission_manager: PermissionManager | None = None,
+        session_id: str | None = None,
     ) -> None:
         self._provider = provider
         self._registry = registry
         self._bus = bus
+        self._permission_manager = permission_manager
+        self._session_id = session_id
 
     async def run(self, context: ExecutionContext) -> None:
         while not context.is_done():
@@ -75,6 +80,7 @@ class AgentLoop:
                 raise
             except Exception as exc:
                 import logging
+
                 logger = logging.getLogger(__name__)
                 logger.exception("LLM request failed: %s", exc)
                 context.mark_failed(f"llm_error: {exc}")
@@ -100,7 +106,12 @@ class AgentLoop:
             if response.stop_reason == "tool_use":
                 for tc in response.tool_calls:
                     result = await invoke_tool(
-                        self._registry, tc, self._bus, context.run_id
+                        self._registry,
+                        tc,
+                        self._bus,
+                        context.run_id,
+                        permission_manager=self._permission_manager,
+                        session_id=self._session_id,
                     )
                     context.add_tool_result(tc.id, result.content)
 

@@ -19,6 +19,7 @@ from simple_agent.core.config import get_config, setup_logging
 from simple_agent.core.events.bus import EventBus
 from simple_agent.core.events.types import RunStartedEvent
 from simple_agent.core.llm.provider import OpenAICompatibleProvider
+from simple_agent.core.permissions import PermissionManager
 from simple_agent.core.runner import AgentRunner, new_run_id
 from simple_agent.core.session.manager import SessionManager
 from simple_agent.core.session.store import SessionStore
@@ -74,6 +75,15 @@ class SessionSendMessageResult(BaseModel):
     run_id: str
 
 
+class PermissionRespondCommand(BaseModel):
+    tool_use_id: str
+    decision: str
+
+
+class PermissionRespondResult(BaseModel):
+    status: str = "ok"
+
+
 class CoreApp:
     def __init__(self, provider: OpenAICompatibleProvider | None = None) -> None:
         self._start_time = time.monotonic()
@@ -87,6 +97,9 @@ class CoreApp:
         self._provider = provider
         self._trace: TraceWriter | None = None
         self._store = SessionStore()
+        self._permission_manager = PermissionManager(
+            policy_file=Path(".permissions.json").expanduser(),
+        )
         self._sessions = SessionManager(
             store=self._store,
             bus=self._bus,
@@ -115,6 +128,7 @@ class CoreApp:
         server.register("agent.run", self._agent_run_handler)
         server.register("session.create", self._session_create_handler)
         server.register("session.send_message", self._session_send_message_handler)
+        server.register("permission.respond", self._permission_respond_handler)
 
         addr = await server.start()
         logger.info("sagent-core %s listening addr=%s", __version__, addr)
@@ -171,7 +185,11 @@ class CoreApp:
 
     def _runner_factory(self) -> AgentRunner:
         return AgentRunner(
-            self._config, bus=self._bus, provider=self._provider, trace=self._trace
+            self._config,
+            bus=self._bus,
+            provider=self._provider,
+            trace=self._trace,
+            permission_manager=self._permission_manager,
         )
 
     async def _agent_run_handler(self, params: dict[str, Any]) -> AgentRunResult:
@@ -200,6 +218,13 @@ class CoreApp:
             cmd.session_id, cmd.content, run_id=None
         )
         return SessionSendMessageResult(run_id=run_id)
+
+    async def _permission_respond_handler(
+        self, params: dict[str, Any]
+    ) -> PermissionRespondResult:
+        cmd = PermissionRespondCommand.model_validate(params)
+        self._permission_manager.respond(cmd.tool_use_id, cmd.decision)
+        return PermissionRespondResult()
 
     async def _replay_events(
         self, run_id: str, writer: asyncio.StreamWriter, topics: list[str]

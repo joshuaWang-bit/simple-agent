@@ -3,10 +3,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 from simple_agent.core.tools.base import BaseTool, ToolResult
 
 
+class ListDirParams(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    path: str
+    max_depth: int = 1
+
+
 class ListDirTool(BaseTool):
+    params_model = ListDirParams
+
     @property
     def name(self) -> str:
         return "list_dir"

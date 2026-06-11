@@ -9,9 +9,12 @@ from typing import Any
 class ToolResult:
     content: str
     is_error: bool = False
+    error_type: str | None = None
 
 
 class BaseTool(ABC):
+    params_model: type | None = None
+
     @property
     @abstractmethod
     def name(self) -> str: ...

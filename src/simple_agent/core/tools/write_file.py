@@ -3,10 +3,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 from simple_agent.core.tools.base import BaseTool, ToolResult
 
 
+class WriteFileParams(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    path: str
+    content: str
+
+
 class WriteFileTool(BaseTool):
+    params_model = WriteFileParams
+
     @property
     def name(self) -> str:
         return "write_file"

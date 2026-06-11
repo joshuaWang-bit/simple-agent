@@ -3,17 +3,20 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from simple_agent.core.tools.base import BaseTool, ToolResult
 
 
 class BashParams(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     command: str
-    timeout: float = Field(default=60.0, le=120.0)
+    timeout: float = Field(default=60.0, gt=0, le=120.0)
 
 
 class BashTool(BaseTool):
+    params_model = BashParams
+
     @property
     def name(self) -> str:
         return "bash"
@@ -31,7 +34,7 @@ class BashTool(BaseTool):
                         "description": "The shell command to execute",
                     },
                     "timeout": {
-                        "type": "number",
+                        "type": "integer",
                         "description": "Timeout in seconds (default 60, max 120)",
                     },
                 },
@@ -56,6 +59,7 @@ class BashTool(BaseTool):
             return ToolResult(
                 content=f"[timeout after {p.timeout}s]",
                 is_error=True,
+                error_type="timeout",
             )
 
         output = stdout_bytes.decode("utf-8", errors="replace")

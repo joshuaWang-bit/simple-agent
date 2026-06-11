@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 from simple_agent.core.tools.base import BaseTool, ToolResult
+
+
+class NoteSaveParams(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    content: str
 
 
 class NoteSaveTool(BaseTool):
@@ -10,6 +17,8 @@ class NoteSaveTool(BaseTool):
         self._store = store
         self._sid = session_id
         self._run_id = run_id
+
+    params_model = NoteSaveParams
 
     @property
     def name(self) -> str:

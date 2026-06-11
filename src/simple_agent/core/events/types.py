@@ -65,6 +65,29 @@ class ToolCallFinishedEvent(BaseModel):
     tool_name: str
     elapsed_ms: int
     output: str = ""
+    is_error: bool = False
+    ts: str
+
+
+class ToolCallFailedEvent(BaseModel):
+    type: Literal["tool.call_failed"] = "tool.call_failed"
+    run_id: str
+    tool_use_id: str
+    tool_name: str
+    error_class: str
+    error_message: str
+    attempt: int | None = None
+    ts: str
+
+
+class PermissionRequestedEvent(BaseModel):
+    type: Literal["permission.requested"] = "permission.requested"
+    run_id: str
+    tool_use_id: str
+    tool_name: str
+    params: dict[str, Any]
+    param_preview: str
+    session_id: str
     ts: str
 
 
@@ -110,6 +133,8 @@ Event = Annotated[
     | LlmTokenEvent
     | ToolCallStartedEvent
     | ToolCallFinishedEvent
+    | ToolCallFailedEvent
+    | PermissionRequestedEvent
     | SessionCreatedEvent
     | SessionMessageReceivedEvent
     | SessionResumedEvent

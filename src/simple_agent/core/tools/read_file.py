@@ -3,10 +3,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 from simple_agent.core.tools.base import BaseTool, ToolResult
 
 
+class ReadFileParams(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    path: str
+
+
 class ReadFileTool(BaseTool):
+    params_model = ReadFileParams
+
     @property
     def name(self) -> str:
         return "read_file"

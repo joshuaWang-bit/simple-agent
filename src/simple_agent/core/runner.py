@@ -17,6 +17,7 @@ from simple_agent.core.events.types import (
 from simple_agent.core.events.writer import EventWriter
 from simple_agent.core.llm.provider import OpenAICompatibleProvider
 from simple_agent.core.loop import AgentLoop
+from simple_agent.core.permissions import PermissionManager
 from simple_agent.core.session import Session
 from simple_agent.core.session.store import SessionStore
 from simple_agent.core.task import TaskManager
@@ -55,6 +56,7 @@ class AgentRunner:
         runs_dir: Path | None = None,
         bus: EventBus | None = None,
         trace: TraceWriter | None = None,
+        permission_manager: PermissionManager | None = None,
     ) -> None:
         self._config = config
         self._provider = provider
@@ -62,6 +64,7 @@ class AgentRunner:
         self._runs_dir = runs_dir or Path("runs")
         self._bus = bus
         self._trace = trace
+        self._permission_manager = permission_manager
 
     async def run(
         self,
@@ -110,7 +113,13 @@ class AgentRunner:
 
         task_manager = TaskManager(run_path / ".tasks")
         registry = self._build_registry(task_manager, session, store, run_id)
-        loop = AgentLoop(provider, registry, bus)
+        loop = AgentLoop(
+            provider,
+            registry,
+            bus,
+            permission_manager=self._permission_manager,
+            session_id=session.id if session is not None else None,
+        )
 
         # 5. 创建"工作记忆"
         context = ExecutionContext(
